@@ -1,0 +1,32 @@
+{
+    "db_path": "monitor.db",
+    "process_interval": 30,
+    "anomaly_train_interval": 3600,
+    "log_level": "INFO",
+    "network_monitor": {
+      "use_packet_capture": true,
+      "lsof_fallback": true,
+      "lsof_interval": 10
+    },
+    "alerts": {
+      "email": {
+        "enabled": false,
+        "smtp_server": "smtp.example.com",
+        "port": 587,
+        "username": "your_email@example.com",
+        "password": "your_password",
+        "recipient": "your_email@example.com",
+        "send_severity": ["high"]
+      },
+      "desktop": {
+        "enabled": true,
+        "show_severity": ["high", "medium"]
+      }
+    },
+    "reporting": {
+      "auto_generate": true,
+      "frequency": "daily",
+      "format": "html",
+      "keep_reports": 30
+    }
+  }
