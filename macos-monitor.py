@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from scapy.all import sniff, IP, TCP, UDP
 from sklearn.ensemble import IsolationForest
 from collections import defaultdict, Counter
+from coolcli import interactive_menu, get_system_summary, display_system_summary, investigate_process
 
 # Set up logging
 logging.basicConfig(
@@ -234,10 +235,14 @@ class ProcessMonitor:
         
         for proc in psutil.process_iter(['pid', 'name', 'username', 
                                         'cpu_percent', 'memory_percent', 
-                                        'cmdline', 'connections', 'status']):
+                                        'cmdline', 'status']):
             try:
                 pinfo = proc.info
-                connection_count = len(pinfo['connections']) if pinfo['connections'] else 0
+                # Get connections separately as it requires special handling
+                try:
+                    connection_count = len(proc.connections())
+                except (psutil.AccessDenied, psutil.ZombieProcess):
+                    connection_count = 0
                 cmdline = " ".join(pinfo['cmdline']) if pinfo['cmdline'] else ""
                 
                 process_data = {
@@ -573,7 +578,8 @@ class MonitoringAgent:
         # Start network monitoring in a separate process
         import multiprocessing
         network_process = multiprocessing.Process(
-            target=self.network_monitor.start_sniffing
+            target=network_monitoring_process,
+            args=(self.db_manager.db_path, "suspicious_ips.txt")
         )
         network_process.start()
         
@@ -910,6 +916,21 @@ def main():
         default="html",
         help="Report format (only used with --report)"
     )
+    parser.add_argument(
+        "--cli",
+        action="store_true",
+        help="Launch the interactive CLI interface"
+    )
+    parser.add_argument(
+        "--investigate",
+        metavar="PROCESS_NAME",
+        help="Investigate a specific process using the enhanced CLI"
+    )
+    parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="Show current system summary using the enhanced CLI"
+    )
     
     args = parser.parse_args()
     
@@ -925,14 +946,53 @@ def main():
     # Initialize the agent
     agent = MonitoringAgent(config)
     
+    # Enhanced CLI options
+    if args.cli:
+        # Launch interactive CLI
+        interactive_menu(config.get("db_path", "monitor.db"))
+        return
+    
+    elif args.investigate:
+        # Investigate a specific process
+        process_data = investigate_process(config.get("db_path", "monitor.db"), args.investigate)
+        from coolcli import display_process_investigation
+        display_process_investigation(process_data)
+        return
+    
+    elif args.summary:
+        # Show system summary
+        data = get_system_summary(config.get("db_path", "monitor.db"))
+        display_system_summary(data)
+        return
+        
     # Generate a report if requested
-    if args.report:
+    elif args.report:
         report_file = agent.generate_report(args.report, args.format)
         print(f"Report generated: {report_file}")
         return
     
     # Otherwise start the monitoring agent
     agent.start()
+
+
+def network_monitoring_process(db_path, suspicious_ips_path):
+    """Standalone function for network monitoring process.
+    
+    This function is designed to run in a separate process and creates its own
+    database connection, avoiding the need to pickle a SQLite connection.
+    """
+    # Create a new database connection in this process
+    db_manager = DatabaseManager(db_path)
+    # Create a new NetworkMonitor with this connection
+    network_monitor = NetworkMonitor(db_manager)
+    # Load suspicious IPs
+    if suspicious_ips_path:
+        network_monitor.load_suspicious_ips(suspicious_ips_path)
+    # Start monitoring
+    try:
+        network_monitor.start_sniffing()
+    finally:
+        db_manager.close()
 
 
 if __name__ == "__main__":
